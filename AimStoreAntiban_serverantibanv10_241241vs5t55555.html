@@ -1,0 +1,2445 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>AimStore - NexusHub</title>
+    <link rel="icon" href="logo.png" type="image/png">
+    <style>
+      /*
+        AimStore-Nexus — single-file SPA (no backend)
+        Dark Cyberpunk/Hacker UI:
+        - Background: #0a0a0a
+        - Primary: #00ff00
+        - Accent:  #00aaff
+        - Font: Share Tech Mono (uses if installed; falls back to monospace)
+
+        Storage policy:
+        - sessionStorage only (tab-scoped; wiped when tab closes)
+        - Persists across refresh (F5): login, credits, inventory, posts
+        - Market list always re-syncs from defaultMarketItems in code
+      */
+
+      :root {
+        --bg: #0a0a0a;
+        --green: #00ff00;
+        --cyan: #00aaff;
+        --panel: rgba(18, 18, 18, 0.86);
+        --panel2: rgba(10, 10, 10, 0.92);
+        --muted: rgba(0, 255, 0, 0.7);
+        --text: rgba(0, 255, 0, 0.92);
+        --ring: 0 0 0 3px rgba(0, 255, 0, 0.22);
+        --ringCyan: 0 0 0 3px rgba(0, 170, 255, 0.22);
+        --shadowGreen: rgba(0, 255, 0, 0.14);
+        --shadowCyan: rgba(0, 170, 255, 0.14);
+        --danger: #ff3b7a;
+        --ok: #4cff78;
+        --radius: 16px;
+        --radiusSm: 12px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        height: 100%;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          "Share Tech Mono",
+          ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          Monaco,
+          Consolas,
+          "Liberation Mono",
+          "Courier New",
+          monospace;
+        overflow-x: hidden;
+      }
+
+      a {
+        color: inherit;
+      }
+
+      button,
+      input,
+      textarea,
+      select {
+        font: inherit;
+      }
+
+      ::selection {
+        background: rgba(0, 255, 0, 0.18);
+      }
+
+      /* Background canvas */
+      #matrix {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        z-index: -3;
+        background: radial-gradient(1200px 700px at 20% 10%, rgba(0, 170, 255, 0.05), transparent 55%),
+          radial-gradient(1000px 600px at 85% 30%, rgba(0, 255, 0, 0.05), transparent 60%),
+          linear-gradient(180deg, rgba(0, 0, 0, 0.52), rgba(0, 0, 0, 0.78));
+      }
+
+      .scanlines {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: -2;
+        background: linear-gradient(
+          to bottom,
+          rgba(255, 255, 255, 0.03),
+          rgba(255, 255, 255, 0.01) 2px,
+          rgba(0, 0, 0, 0) 4px
+        );
+        background-size: 100% 6px;
+        mix-blend-mode: overlay;
+        opacity: 0.22;
+      }
+
+      .noise {
+        position: fixed;
+        inset: 0;
+        z-index: -2;
+        pointer-events: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.35'/%3E%3C/svg%3E");
+        opacity: 0.06;
+        mix-blend-mode: overlay;
+      }
+
+      .vignette {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: -2;
+        background:
+          radial-gradient(1400px 900px at 50% 30%, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.72) 70%),
+          radial-gradient(900px 520px at 50% 100%, rgba(0, 0, 0, 0.24), rgba(0, 0, 0, 0.92) 82%);
+      }
+
+      .container {
+        width: min(1160px, calc(100% - 40px));
+        margin: 0 auto;
+      }
+
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        backdrop-filter: blur(10px);
+        background: rgba(10, 10, 10, 0.66);
+        border-bottom: 1px solid rgba(0, 255, 0, 0.18);
+      }
+
+      .nav {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 14px 0;
+        position: relative;
+      }
+
+      .logo {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 10px;
+        text-decoration: none;
+        color: var(--green);
+        letter-spacing: 0.5px;
+        font-weight: 900;
+        white-space: nowrap;
+        user-select: none;
+      }
+
+      .logoMark {
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+        background: linear-gradient(135deg, var(--cyan), var(--green));
+        box-shadow: 0 0 18px rgba(0, 170, 255, 0.35), 0 0 18px rgba(0, 255, 0, 0.22);
+      }
+
+      /* Glitch logo */
+      .glitch {
+        position: relative;
+        display: inline-block;
+        text-shadow: 0 0 18px rgba(0, 255, 0, 0.22);
+      }
+      .glitch::before,
+      .glitch::after {
+        content: attr(data-text);
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        overflow: hidden;
+        clip-path: inset(0 0 0 0);
+        opacity: 0.8;
+      }
+      .glitch::before {
+        transform: translate(1px, 0);
+        color: var(--cyan);
+        filter: blur(0.2px);
+        animation: glitchShift 3.6s infinite linear alternate-reverse;
+      }
+      .glitch::after {
+        transform: translate(-1px, 0);
+        color: rgba(255, 59, 122, 0.8);
+        filter: blur(0.2px);
+        animation: glitchShift 2.9s infinite linear alternate;
+      }
+      @keyframes glitchShift {
+        0% {
+          clip-path: inset(0 0 95% 0);
+          transform: translate(0px, 0);
+          opacity: 0.25;
+        }
+        10% {
+          clip-path: inset(20% 0 55% 0);
+          transform: translate(1px, 0);
+          opacity: 0.85;
+        }
+        18% {
+          clip-path: inset(65% 0 15% 0);
+          transform: translate(-1px, 0);
+          opacity: 0.75;
+        }
+        28% {
+          clip-path: inset(10% 0 80% 0);
+          transform: translate(2px, 0);
+          opacity: 0.55;
+        }
+        38% {
+          clip-path: inset(80% 0 5% 0);
+          transform: translate(-2px, 0);
+          opacity: 0.7;
+        }
+        52%,
+        100% {
+          clip-path: inset(0 0 0 0);
+          transform: translate(0px, 0);
+          opacity: 0.22;
+        }
+      }
+
+      .navRight {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      nav ul {
+        list-style: none;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0;
+        margin: 0;
+      }
+
+      .navBtn {
+        appearance: none;
+        border: 1px solid rgba(0, 255, 0, 0.22);
+        color: var(--text);
+        background: linear-gradient(180deg, rgba(0, 255, 0, 0.05), rgba(0, 0, 0, 0.18));
+        padding: 10px 12px;
+        border-radius: 999px;
+        text-decoration: none;
+        font-weight: 800;
+        letter-spacing: 0.5px;
+        cursor: pointer;
+        transition:
+          transform 140ms ease,
+          border-color 140ms ease,
+          box-shadow 140ms ease,
+          opacity 140ms ease;
+      }
+      .navBtn:hover {
+        transform: translateY(-1px);
+        border-color: rgba(0, 255, 0, 0.55);
+        box-shadow: 0 0 0 1px rgba(0, 255, 0, 0.14), 0 0 18px rgba(0, 255, 0, 0.18);
+      }
+      .navBtn:focus-visible {
+        outline: none;
+        box-shadow: var(--ring), 0 0 22px rgba(0, 255, 0, 0.18);
+      }
+      .navBtn.cyan {
+        border-color: rgba(0, 170, 255, 0.32);
+        color: rgba(0, 170, 255, 0.92);
+        background: linear-gradient(180deg, rgba(0, 170, 255, 0.08), rgba(0, 0, 0, 0.2));
+      }
+      .navBtn.cyan:hover {
+        border-color: rgba(0, 170, 255, 0.78);
+        box-shadow: 0 0 0 1px rgba(0, 170, 255, 0.14), 0 0 18px rgba(0, 170, 255, 0.18);
+      }
+      .navBtn.cyan:focus-visible {
+        box-shadow: var(--ringCyan), 0 0 22px rgba(0, 170, 255, 0.18);
+      }
+
+      .hamburger {
+        display: none;
+        width: 44px;
+        height: 42px;
+        border-radius: 12px;
+        border: 1px solid rgba(0, 255, 0, 0.22);
+        background: rgba(0, 0, 0, 0.25);
+        color: rgba(0, 255, 0, 0.9);
+        cursor: pointer;
+        align-items: center;
+        justify-content: center;
+        transition:
+          transform 140ms ease,
+          border-color 140ms ease,
+          box-shadow 140ms ease;
+      }
+      .hamburger:hover {
+        transform: translateY(-1px);
+        border-color: rgba(0, 255, 0, 0.55);
+        box-shadow: 0 0 20px rgba(0, 255, 0, 0.14);
+      }
+      .hamburger:focus-visible {
+        outline: none;
+        box-shadow: var(--ring);
+      }
+      .hamburgerLines {
+        display: grid;
+        gap: 5px;
+      }
+      .hamburgerLines span {
+        width: 18px;
+        height: 2px;
+        background: rgba(0, 255, 0, 0.85);
+        box-shadow: 0 0 18px rgba(0, 255, 0, 0.15);
+      }
+
+      main {
+        padding: 26px 0 64px;
+      }
+
+      .appShell {
+        margin-top: 16px;
+        border-radius: var(--radius);
+        border: 1px solid rgba(0, 255, 0, 0.18);
+        background: linear-gradient(180deg, rgba(18, 18, 18, 0.55), rgba(10, 10, 10, 0.86));
+        box-shadow: 0 0 0 1px rgba(0, 255, 0, 0.06), 0 26px 90px rgba(0, 0, 0, 0.5);
+        overflow: hidden;
+        position: relative;
+      }
+
+      .appTopbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 14px;
+        border-bottom: 1px solid rgba(0, 255, 0, 0.14);
+        background: linear-gradient(180deg, rgba(0, 255, 0, 0.05), rgba(0, 0, 0, 0.24));
+      }
+
+      .sysPills {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border-radius: 999px;
+        padding: 7px 10px;
+        border: 1px solid rgba(0, 255, 0, 0.18);
+        background: rgba(0, 0, 0, 0.22);
+        color: rgba(0, 255, 0, 0.78);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+
+      .pill .dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 999px;
+        background: var(--cyan);
+        box-shadow: 0 0 18px rgba(0, 170, 255, 0.28);
+        opacity: 0.95;
+      }
+
+      .pill.cyan {
+        border-color: rgba(0, 170, 255, 0.22);
+        color: rgba(0, 170, 255, 0.86);
+      }
+
+      .hudStat {
+        text-align: right;
+        font-size: 12px;
+        color: rgba(0, 255, 0, 0.72);
+      }
+      .hudStat strong {
+        display: block;
+        color: rgba(0, 170, 255, 0.9);
+        letter-spacing: 0.5px;
+      }
+
+      .sections {
+        position: relative;
+        padding: 16px;
+      }
+
+      .section {
+        display: none;
+      }
+      .section.active {
+        display: block;
+        animation: sectionIn 180ms ease-out;
+      }
+      @keyframes sectionIn {
+        from {
+          opacity: 0.65;
+          transform: translateY(2px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .scanFlash {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0;
+      }
+      .scanFlash.on {
+        opacity: 1;
+        animation: scanFlash 260ms ease-out;
+      }
+      @keyframes scanFlash {
+        0% {
+          opacity: 0;
+        }
+        25% {
+          opacity: 1;
+        }
+        100% {
+          opacity: 0;
+        }
+      }
+      .scanFlash::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+          linear-gradient(to bottom, rgba(0, 255, 0, 0), rgba(0, 255, 0, 0.09), rgba(0, 255, 0, 0)),
+          repeating-linear-gradient(
+            to bottom,
+            rgba(255, 255, 255, 0.05),
+            rgba(255, 255, 255, 0.02) 2px,
+            rgba(0, 0, 0, 0) 4px
+          );
+        background-size: 100% 100%, 100% 6px;
+        transform: translateY(-10%);
+      }
+      .scanFlash.on::before {
+        animation: scanSweep 260ms ease-out;
+      }
+      @keyframes scanSweep {
+        from {
+          transform: translateY(-16%);
+        }
+        to {
+          transform: translateY(8%);
+        }
+      }
+
+      .grid2 {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 14px;
+        align-items: start;
+      }
+
+      .grid3 {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .panel {
+        border-radius: var(--radius);
+        padding: 16px;
+        background: linear-gradient(180deg, var(--panel), var(--panel2));
+        border: 1px solid rgba(0, 255, 0, 0.2);
+        box-shadow: 0 0 0 1px rgba(0, 255, 0, 0.06);
+      }
+      .panel.cyan {
+        border-color: rgba(0, 170, 255, 0.22);
+        box-shadow: 0 0 0 1px rgba(0, 170, 255, 0.08);
+      }
+
+      .panelHeader {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .panelTitle {
+        margin: 0;
+        font-size: 14px;
+        letter-spacing: 0.8px;
+        color: rgba(0, 255, 0, 0.9);
+      }
+      .panelTitle.cyan {
+        color: rgba(0, 170, 255, 0.92);
+      }
+
+      .subtle {
+        margin: 0;
+        color: rgba(0, 255, 0, 0.6);
+        font-size: 12px;
+      }
+
+      .divider {
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(0, 255, 0, 0.22), transparent);
+        margin: 14px 0 18px;
+      }
+      .divider.cyan {
+        background: linear-gradient(90deg, transparent, rgba(0, 170, 255, 0.22), transparent);
+      }
+
+      .btnRow {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .btn {
+        appearance: none;
+        border: 1px solid rgba(0, 255, 0, 0.22);
+        color: rgba(0, 255, 0, 0.9);
+        background: linear-gradient(180deg, rgba(0, 255, 0, 0.05), rgba(0, 0, 0, 0.2));
+        padding: 11px 12px;
+        border-radius: 12px;
+        cursor: pointer;
+        font-weight: 900;
+        letter-spacing: 0.5px;
+        transition:
+          transform 140ms ease,
+          border-color 140ms ease,
+          box-shadow 140ms ease,
+          opacity 140ms ease;
+      }
+      .btn:hover {
+        transform: translateY(-1px);
+        border-color: rgba(0, 255, 0, 0.62);
+        box-shadow: 0 0 26px rgba(0, 255, 0, 0.12);
+      }
+      .btn:focus-visible {
+        outline: none;
+        box-shadow: var(--ring);
+      }
+      .btn.cyan {
+        border-color: rgba(0, 170, 255, 0.26);
+        color: rgba(0, 170, 255, 0.92);
+        background: linear-gradient(180deg, rgba(0, 170, 255, 0.08), rgba(0, 0, 0, 0.22));
+      }
+      .btn.cyan:hover {
+        border-color: rgba(0, 170, 255, 0.75);
+        box-shadow: 0 0 26px rgba(0, 170, 255, 0.14);
+      }
+      .btn.pink {
+        border-color: rgba(255, 59, 122, 0.38);
+        color: rgba(255, 120, 170, 0.98);
+        background: linear-gradient(180deg, rgba(255, 59, 122, 0.09), rgba(0, 0, 0, 0.24));
+      }
+      .btn.pink:hover {
+        border-color: rgba(255, 59, 122, 0.78);
+        box-shadow: 0 0 26px rgba(255, 59, 122, 0.16);
+      }
+      .btn.pink:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 3px rgba(255, 59, 122, 0.22);
+      }
+      .btn.danger {
+        border-color: rgba(255, 59, 122, 0.35);
+        color: rgba(255, 59, 122, 0.92);
+        background: linear-gradient(180deg, rgba(255, 59, 122, 0.07), rgba(0, 0, 0, 0.24));
+      }
+      .btn.danger:hover {
+        border-color: rgba(255, 59, 122, 0.7);
+        box-shadow: 0 0 26px rgba(255, 59, 122, 0.16);
+      }
+      .btn[disabled] {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      input,
+      textarea,
+      select {
+        width: 100%;
+        border-radius: 12px;
+        border: 1px solid rgba(0, 255, 0, 0.22);
+        background: rgba(0, 0, 0, 0.28);
+        color: rgba(0, 255, 0, 0.92);
+        padding: 12px 12px;
+        letter-spacing: 0.3px;
+        transition:
+          border-color 140ms ease,
+          box-shadow 140ms ease;
+      }
+      textarea {
+        min-height: 110px;
+        resize: vertical;
+      }
+      input::placeholder,
+      textarea::placeholder {
+        color: rgba(0, 255, 0, 0.45);
+      }
+      input:focus,
+      textarea:focus,
+      select:focus {
+        outline: none;
+        border-color: rgba(0, 255, 0, 0.62);
+        box-shadow: var(--ring);
+      }
+      select:focus {
+        box-shadow: var(--ringCyan);
+        border-color: rgba(0, 170, 255, 0.65);
+      }
+
+      .formRow {
+        display: grid;
+        gap: 10px;
+        margin: 0;
+        padding: 0;
+      }
+
+      .kbd {
+        display: inline-block;
+        border: 1px solid rgba(0, 255, 0, 0.22);
+        padding: 1px 6px;
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.2);
+        color: rgba(0, 255, 0, 0.82);
+        font-size: 12px;
+      }
+
+      .monoBox {
+        border-radius: 14px;
+        border: 1px solid rgba(0, 255, 0, 0.18);
+        background: rgba(0, 0, 0, 0.22);
+        padding: 12px 12px;
+        color: rgba(0, 255, 0, 0.82);
+        line-height: 1.55;
+        font-size: 13px;
+        white-space: pre-wrap;
+      }
+
+      /* SOCIAL */
+      .feed {
+        display: grid;
+        gap: 10px;
+        margin-top: 10px;
+      }
+      .post {
+        border-radius: 14px;
+        border: 1px solid rgba(0, 255, 0, 0.18);
+        background: rgba(0, 0, 0, 0.22);
+        padding: 12px 12px;
+        box-shadow: 0 0 0 1px rgba(0, 255, 0, 0.05);
+      }
+      .postTop {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 6px;
+      }
+      .userTag {
+        color: rgba(0, 170, 255, 0.9);
+        font-weight: 900;
+        letter-spacing: 0.2px;
+      }
+      .timeTag {
+        color: rgba(0, 255, 0, 0.55);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      .postBody {
+        margin: 0;
+        color: rgba(0, 255, 0, 0.82);
+        line-height: 1.55;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
+      /* MARKET */
+      .marketGrid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+      }
+      .marketCard {
+        border-radius: var(--radius);
+        padding: 16px;
+        background: linear-gradient(180deg, rgba(18, 18, 18, 0.74), rgba(10, 10, 10, 0.92));
+        border: 1px solid rgba(0, 255, 0, 0.2);
+        box-shadow: 0 0 0 1px rgba(0, 255, 0, 0.06);
+        transition:
+          transform 160ms ease,
+          border-color 160ms ease,
+          box-shadow 160ms ease;
+        position: relative;
+        overflow: hidden;
+      }
+      .marketCard:hover {
+        transform: translateY(-2px);
+        border-color: rgba(0, 255, 0, 0.62);
+        box-shadow:
+          0 0 0 1px rgba(0, 255, 0, 0.14),
+          0 0 26px rgba(0, 255, 0, 0.12),
+          0 0 34px rgba(0, 170, 255, 0.06);
+      }
+      .marketCard h3 {
+        margin: 0 0 8px;
+        font-size: 15px;
+        color: rgba(0, 170, 255, 0.92);
+        letter-spacing: 0.4px;
+      }
+      .marketCard p {
+        margin: 0 0 12px;
+        color: rgba(0, 255, 0, 0.72);
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      .marketActions {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        align-items: center;
+      }
+
+      .btn.sm {
+        padding: 10px 10px;
+        font-size: 12px;
+        border-radius: 12px;
+        text-align: center;
+        width: 100%;
+      }
+
+      .tag {
+        border-radius: 999px;
+        padding: 6px 10px;
+        border: 1px solid rgba(0, 170, 255, 0.22);
+        color: rgba(0, 170, 255, 0.82);
+        background: rgba(0, 170, 255, 0.05);
+        font-size: 12px;
+      }
+
+      /* Modals */
+      .overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 200;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 18px;
+        background: rgba(0, 0, 0, 0.68);
+        backdrop-filter: blur(10px);
+      }
+      .overlay[data-open="true"] {
+        display: flex;
+      }
+      .modal {
+        width: min(720px, 100%);
+        border-radius: 16px;
+        background: linear-gradient(180deg, rgba(18, 18, 18, 0.92), rgba(10, 10, 10, 0.96));
+        border: 1px solid rgba(0, 255, 0, 0.28);
+        box-shadow:
+          0 0 0 1px rgba(0, 255, 0, 0.1),
+          0 24px 90px rgba(0, 0, 0, 0.65),
+          0 0 46px rgba(0, 255, 0, 0.08);
+        overflow: hidden;
+        position: relative;
+      }
+      .modal.small {
+        width: min(520px, 100%);
+      }
+      .modalHeader {
+        padding: 14px 14px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        border-bottom: 1px solid rgba(0, 255, 0, 0.16);
+        background: linear-gradient(180deg, rgba(0, 255, 0, 0.06), rgba(0, 0, 0, 0.22));
+      }
+      .modalTitle {
+        margin: 0;
+        font-weight: 900;
+        letter-spacing: 0.6px;
+        color: rgba(0, 170, 255, 0.92);
+        font-size: 14px;
+      }
+      .closeBtn {
+        appearance: none;
+        border: 1px solid rgba(0, 255, 0, 0.22);
+        border-radius: 10px;
+        background: rgba(0, 0, 0, 0.28);
+        color: var(--text);
+        padding: 8px 10px;
+        cursor: pointer;
+        transition:
+          transform 140ms ease,
+          border-color 140ms ease,
+          box-shadow 140ms ease;
+      }
+      .closeBtn:hover {
+        transform: translateY(-1px);
+        border-color: rgba(0, 255, 0, 0.55);
+        box-shadow: 0 0 20px rgba(0, 255, 0, 0.14);
+      }
+      .closeBtn:focus-visible {
+        outline: none;
+        box-shadow: var(--ring);
+      }
+      .modalBody {
+        padding: 16px 16px 18px;
+      }
+
+      .hint {
+        margin: 0 0 14px;
+        color: rgba(0, 255, 0, 0.72);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .twoCol {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        align-items: start;
+      }
+
+      .loader {
+        display: inline-block;
+        width: 14px;
+        height: 14px;
+        border-radius: 999px;
+        border: 2px solid rgba(0, 170, 255, 0.18);
+        border-top-color: rgba(0, 170, 255, 0.95);
+        animation: spin 0.9s linear infinite;
+        vertical-align: -2px;
+        margin-right: 8px;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* Toasts */
+      #toasts {
+        position: fixed;
+        right: 16px;
+        bottom: 16px;
+        display: grid;
+        gap: 10px;
+        z-index: 500;
+        width: min(360px, calc(100% - 32px));
+      }
+      .toast {
+        border-radius: 14px;
+        border: 1px solid rgba(0, 255, 0, 0.22);
+        background: rgba(0, 0, 0, 0.38);
+        backdrop-filter: blur(8px);
+        padding: 12px 12px;
+        box-shadow: 0 0 0 1px rgba(0, 255, 0, 0.06), 0 18px 50px rgba(0, 0, 0, 0.55);
+        color: rgba(0, 255, 0, 0.86);
+        animation: toastIn 180ms ease-out;
+      }
+      .toast strong {
+        display: block;
+        color: rgba(0, 170, 255, 0.9);
+        margin-bottom: 4px;
+      }
+      .toast.error {
+        border-color: rgba(255, 59, 122, 0.35);
+        color: rgba(255, 140, 176, 0.95);
+      }
+      .toast.error strong {
+        color: rgba(255, 59, 122, 0.95);
+      }
+      .toast.ok {
+        border-color: rgba(76, 255, 120, 0.25);
+      }
+      @keyframes toastIn {
+        from {
+          transform: translateY(6px);
+          opacity: 0;
+        }
+        to {
+          transform: translateY(0);
+          opacity: 1;
+        }
+      }
+
+      footer {
+        padding: 18px 0 40px;
+        color: rgba(0, 255, 0, 0.55);
+        font-size: 12px;
+      }
+
+      /* Responsive */
+      @media (max-width: 920px) {
+        .grid2 {
+          grid-template-columns: 1fr;
+        }
+        .marketGrid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      @media (max-width: 720px) {
+        .container {
+          width: min(1100px, calc(100% - 28px));
+        }
+        .grid3 {
+          grid-template-columns: 1fr;
+        }
+        .marketGrid {
+          grid-template-columns: 1fr;
+        }
+        .marketActions {
+          grid-template-columns: 1fr;
+        }
+        nav {
+          display: none;
+        }
+        nav[data-open="true"] {
+          display: block;
+          position: absolute;
+          top: 64px;
+          right: 16px;
+          left: 16px;
+          padding: 12px;
+          border-radius: 16px;
+          border: 1px solid rgba(0, 255, 0, 0.18);
+          background: rgba(0, 0, 0, 0.6);
+          backdrop-filter: blur(10px);
+          box-shadow: 0 0 0 1px rgba(0, 255, 0, 0.06), 0 26px 90px rgba(0, 0, 0, 0.55);
+        }
+        nav ul {
+          display: grid;
+          gap: 10px;
+        }
+        .hamburger {
+          display: inline-flex;
+        }
+        .navBtn {
+          width: 100%;
+          justify-content: center;
+          padding: 11px 12px;
+          font-size: 12px;
+        }
+        .twoCol {
+          grid-template-columns: 1fr;
+        }
+        .overlay {
+          padding: 14px;
+        }
+        .modalBody {
+          padding: 14px;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          animation-duration: 0.001ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.001ms !important;
+          scroll-behavior: auto !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="matrix" aria-hidden="true"></canvas>
+    <div class="scanlines" aria-hidden="true"></div>
+    <div class="noise" aria-hidden="true"></div>
+    <div class="vignette" aria-hidden="true"></div>
+
+    <header>
+      <div class="container">
+        <div class="nav">
+          <a class="logo" href="#" aria-label="SYS.AIMSTORE_NEXUS home">
+            <span class="logoMark" aria-hidden="true"></span>
+            <span class="glitch" data-text="SYS.AIMSTORE_NEXUS">SYS.AIMSTORE_NEXUS</span>
+          </a>
+
+          <div class="navRight">
+            <button id="hamburger" class="hamburger" type="button" aria-label="Open menu" aria-expanded="false">
+              <span class="hamburgerLines" aria-hidden="true">
+                <span></span>
+                <span></span>
+                <span></span>
+              </span>
+            </button>
+
+            <nav id="navMenu" aria-label="Primary" data-open="false">
+              <ul>
+                <li><button class="navBtn" type="button" data-nav="home"> HOME </button></li>
+                <li><button class="navBtn" type="button" data-nav="social"> SOCIAL_NET </button></li>
+                <li><button class="navBtn" type="button" data-nav="game"> GAME_ZONES </button></li>
+                <li><button class="navBtn" type="button" data-nav="market"> BLACK_MARKET </button></li>
+                <li><button class="navBtn" type="button" data-nav="profile"> PROFILE </button></li>
+                <li><button class="navBtn" type="button" data-nav="about"> ABOUT </button></li>
+                <li><button class="navBtn" type="button" data-nav="privacy"> PRIVACY </button></li>
+                <li><button id="openLogin" class="navBtn cyan" type="button"> LOGIN </button></li>
+              </ul>
+            </nav>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <div class="container">
+        <div class="appShell" role="application" aria-label="AimStore-Nexus">
+          <div class="appTopbar">
+            <div class="sysPills" aria-label="Session status">
+              <span class="pill"><span class="dot" aria-hidden="true"></span><span id="hudUser">USER: GUEST</span></span>
+              <span class="pill cyan"><span id="hudRank">RANK: AGENT</span></span>
+              <span class="pill"><span id="hudBalance">BAL: 0 CR</span></span>
+            </div>
+            <div class="hudStat">
+              <strong id="hudSection">HOME</strong>
+              <span>tap menu • <span class="kbd">ESC</span> closes modals</span>
+            </div>
+          </div>
+
+          <div class="sections">
+            <div id="scanFlash" class="scanFlash" aria-hidden="true"></div>
+
+            <!-- HOME -->
+            <section class="section active" data-section="home" aria-label="Home">
+              <div class="grid2">
+                <div class="panel">
+                  <div class="panelHeader">
+                    <h2 class="panelTitle">HOME / ENTRY NODE</h2>
+                    <p class="subtle">underground marketplace + optimization hub</p>
+                  </div>
+                  <div class="divider" aria-hidden="true"></div>
+                  <div class="monoBox" id="homeTerminal" aria-live="polite"></div>
+                  <div class="btnRow" style="margin-top: 12px">
+                    <button class="btn cyan" type="button" data-nav="market">ENTER BLACK_MARKET</button>
+                    <button class="btn" type="button" data-nav="social">OPEN SOCIAL_NET</button>
+                    <button class="btn" type="button" data-nav="game">RUN GAME_ZONES</button>
+                  </div>
+                </div>
+
+                <div class="panel cyan">
+                  <div class="panelHeader">
+                    <h2 class="panelTitle cyan">SYSTEM / RULESET</h2>
+                    <p class="subtle">Zero-Trace session • survives F5 • wiped on tab close</p>
+                  </div>
+                  <div class="divider cyan" aria-hidden="true"></div>
+                  <div class="monoBox">
+> Storage: sessionStorage (tab-scoped)
+> Resilience: refresh (F5) safe
+> Zero-Trace: close tab wipes Inventory/Credits/Posts
+> Credits: CR (default 1,000,000 on first load)
+> Modules: SOCIAL_NET / GAME_ZONES / BLACK_MARKET / PROFILE
+> Root: SYS_ADMIN appears only for ROOT ADMIN login
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- SOCIAL_NET -->
+            <section class="section" data-section="social" aria-label="Social Net">
+              <div class="grid2">
+                <div class="panel">
+                  <div class="panelHeader">
+                    <h2 class="panelTitle">SOCIAL_NET / PUBLIC FEED</h2>
+                    <p class="subtle">terminal board • posts persist</p>
+                  </div>
+                  <div class="divider" aria-hidden="true"></div>
+                  <div class="formRow">
+                    <textarea id="postText" placeholder="Write status... (e.g. 'scan complete — new endpoint found')"></textarea>
+                    <div class="btnRow">
+                      <button id="postBtn" class="btn cyan" type="button">POST</button>
+                      <button id="clearDraftBtn" class="btn" type="button">CLEAR</button>
+                    </div>
+                    <p class="subtle" style="margin: 0">Posts display as <span class="userTag">@username</span>. Login sets your username.</p>
+                  </div>
+                </div>
+                <div class="panel">
+                  <div class="panelHeader">
+                    <h2 class="panelTitle">FEED / STREAM</h2>
+                    <p class="subtle"><span id="postCount">0</span> entries</p>
+                  </div>
+                  <div class="divider" aria-hidden="true"></div>
+                  <div id="feed" class="feed" aria-live="polite"></div>
+                </div>
+              </div>
+            </section>
+
+            <!-- GAME_ZONES -->
+            <section class="section" data-section="game" aria-label="Game Zones">
+              <div class="grid2">
+                <div class="panel">
+                  <div class="panelHeader">
+                    <h2 class="panelTitle">GAME_ZONES / SENSITIVITY ENGINE</h2>
+                    <p class="subtle">Free Fire tuning generator</p>
+                  </div>
+                  <div class="divider" aria-hidden="true"></div>
+                  <div class="formRow">
+                    <input id="deviceName" type="text" placeholder="Device Name (e.g., Honor 90)" />
+                    <div class="btnRow">
+                      <button id="scanBtn" class="btn cyan" type="button">SCAN</button>
+                      <button id="rngBtn" class="btn" type="button">REROLL</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="panel cyan">
+                  <div class="panelHeader">
+                    <h2 class="panelTitle cyan">RESULT / RECOMMENDATION</h2>
+                    <p class="subtle">randomized per scan</p>
+                  </div>
+                  <div class="divider cyan" aria-hidden="true"></div>
+                  <div id="scanResult" class="monoBox">Awaiting scan...</div>
+                </div>
+              </div>
+            </section>
+
+            <!-- BLACK_MARKET -->
+            <section class="section" data-section="market" aria-label="Black Market">
+              <div class="panel">
+                <div class="panelHeader">
+                  <h2 class="panelTitle">BLACK_MARKET / PRODUCTS</h2>
+                  <p class="subtle">default items load if storage empty</p>
+                </div>
+                <div class="divider" aria-hidden="true"></div>
+                <div id="marketGrid" class="marketGrid"></div>
+              </div>
+            </section>
+
+            <!-- PROFILE -->
+            <section class="section" data-section="profile" aria-label="Profile">
+              <div class="grid2">
+                <div class="panel cyan">
+                  <div class="panelHeader">
+                    <h2 class="panelTitle cyan">PROFILE / IDENTITY</h2>
+                    <p class="subtle">session login persists; data resets on refresh</p>
+                  </div>
+                  <div class="divider cyan" aria-hidden="true"></div>
+                  <div class="monoBox" id="profileBox"></div>
+                  <div class="btnRow" style="margin-top: 12px">
+                    <button id="logoutBtn" class="btn danger" type="button">LOGOUT</button>
+                    <button id="resetBtn" class="btn" type="button">RESET SESSION</button>
+                  </div>
+                </div>
+                <div class="panel">
+                  <div class="panelHeader">
+                    <h2 class="panelTitle">INVENTORY / PURCHASED</h2>
+                    <p class="subtle">items you own</p>
+                  </div>
+                  <div class="divider" aria-hidden="true"></div>
+                  <div id="inventoryList" class="feed"></div>
+                </div>
+              </div>
+            </section>
+
+            <!-- ABOUT -->
+            <section class="section" data-section="about" aria-label="About">
+              <div class="panel">
+                <div class="panelHeader">
+                  <h2 class="panelTitle">ABOUT</h2>
+                  <p class="subtle">Identity: Decentralized Network • Mission: Digital Optimization</p>
+                </div>
+                <div class="divider" aria-hidden="true"></div>
+                <div class="monoBox">
+SYS.AIMSTORE_NEXUS is an encrypted digital hub built for operators who move fast, stay silent, and optimize everything.
+
+Identity: Decentralized Network
+- A distributed interface designed to function without centralized servers or permanent storage.
+- A cyber-nexus that behaves like a relay node: minimal footprint, maximum control.
+
+Mission: Digital Optimization
+- Provide precision gaming optimization tools (DPI / Sensitivity generation) for rapid tuning.
+- Offer curated digital assets in the BLACK_MARKET module with direct access paths and gateway routing.
+- Maintain a terminal-native workflow: quick navigation, instant feedback, and neon HUD telemetry.
+
+Operational Mode
+- SOCIAL_NET: a public message feed for status transmissions and operator notes.
+- GAME_ZONES: scan-driven configuration output (DPI + sensitivity ranges) for performance tuning.
+- BLACK_MARKET: a secure catalog interface for exclusive packages and manuals.
+
+AimStore-Nexus is not a promise of permanence — it is a system designed for speed, privacy, and repeatable execution.
+                </div>
+              </div>
+            </section>
+
+            <!-- PRIVACY -->
+            <section class="section" data-section="privacy" aria-label="Privacy">
+              <div class="panel cyan">
+                <div class="panelHeader">
+                  <h2 class="panelTitle cyan">PRIVACY</h2>
+                  <p class="subtle">Zero-Trace Policy • SessionStorage (RAM-only) Operations</p>
+                </div>
+                <div class="divider cyan" aria-hidden="true"></div>
+                <div class="monoBox">
+Zero-Trace Principle
+AimStore-Nexus is designed to minimize persistence and maximize anonymity. The system runs without a backend and does not write permanent application data to your hard drive.
+
+Storage Model (SessionStorage / RAM-only)
+- This application uses sessionStorage to maintain runtime state during the active browser tab session.
+- Data persists through refresh (F5) and normal navigation while the tab remains open.
+- When the browser tab is closed, the session is destroyed and all sessionStorage data is wiped by the browser.
+
+What is stored (while the tab is open)
+- Login state (ID + admin flag)
+- Credits balance (CR)
+- Inventory items acquired during the session
+- SOCIAL_NET posts created during the session
+
+What is NOT stored
+- No localStorage is used.
+- No server-side storage exists.
+- No long-term identifiers or tracking mechanisms are written by this application.
+
+Tab Close Wipe (Explicit)
+Closing the browser tab will wipe session data including Inventory, Credits, and Posts. This is intentional and is the core of the Zero-Trace policy.
+                </div>
+              </div>
+            </section>
+
+            <!-- SYS_ADMIN (hidden unless ROOT) -->
+            <section class="section" data-section="admin" aria-label="System Admin" id="adminSection">
+              <div class="panel">
+                <div class="panelHeader">
+                  <h2 class="panelTitle">SYS_ADMIN / ROOT ACCESS</h2>
+                  <p class="subtle">visible only for ROOT ADMIN</p>
+                </div>
+                <div class="divider" aria-hidden="true"></div>
+                <div class="grid3">
+                  <div class="panel">
+                    <div class="panelHeader">
+                      <h3 class="panelTitle">INJECT MARKET ITEM</h3>
+                      <p class="subtle">adds product to BLACK_MARKET</p>
+                    </div>
+                    <div class="formRow">
+                      <input id="adminItemTitle" type="text" placeholder="Title (e.g., Antiban Kernel Patch)" />
+                      <textarea id="adminItemDesc" placeholder="Description"></textarea>
+                      <input id="adminItemTags" type="text" placeholder="Tags (comma separated)" />
+                      <input id="adminItemPrice" type="number" min="0" step="1" placeholder="Base Price (CR)" />
+                      <button id="adminAddItemBtn" class="btn cyan" type="button">INJECT</button>
+                    </div>
+                  </div>
+                  <div class="panel cyan">
+                    <div class="panelHeader">
+                      <h3 class="panelTitle cyan">OVERRIDE BALANCE</h3>
+                      <p class="subtle">add credits to account</p>
+                    </div>
+                    <div class="formRow">
+                      <input id="adminCreditAdd" type="number" min="0" step="1" placeholder="Add CR amount" />
+                      <button id="adminAddCreditBtn" class="btn cyan" type="button">ADD CREDITS</button>
+                      <p class="subtle" style="margin: 0">Current: <strong id="adminBalNow" style="color: rgba(0, 170, 255, 0.9)">0</strong> CR</p>
+                    </div>
+                  </div>
+                  <div class="panel">
+                    <div class="panelHeader">
+                      <h3 class="panelTitle">DELETE SOCIAL POST</h3>
+                      <p class="subtle">remove by post id</p>
+                    </div>
+                    <div class="formRow">
+                      <input id="adminDeletePostId" type="text" placeholder="Post ID (e.g., p_...)" />
+                      <button id="adminDeletePostBtn" class="btn danger" type="button">DELETE</button>
+                      <p class="subtle" style="margin: 0">Tip: each post shows its ID in small text.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <footer>
+          <div class="divider" aria-hidden="true"></div>
+          <div>© <span id="year"></span> AimStore-Nexus — SYS.AIMSTORE_NEXUS interface.</div>
+        </footer>
+      </div>
+    </main>
+
+    <!-- Login modal -->
+    <div id="loginOverlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="loginTitle" data-open="false">
+      <div class="modal small">
+        <div class="modalHeader">
+          <p class="modalTitle" id="loginTitle">LOGIN / AUTH</p>
+          <button id="closeLogin" class="closeBtn" type="button" aria-label="Close login dialog">ESC</button>
+        </div>
+        <div class="modalBody">
+          <p class="hint">
+            Login Account NexusHub System
+            <span class="kbd">V10.432.12</span>
+          </p>
+          <form id="loginForm" class="formRow">
+            <input id="loginId" type="text" autocomplete="off" placeholder="ID (e.g., agent_neo)" required />
+            <input id="loginPass" type="password" autocomplete="off" placeholder="PASS" required />
+            <div class="btnRow" style="justify-content: space-between">
+              <button id="submitLogin" class="btn cyan" type="submit">AUTHENTICATE</button>
+              <div id="loginStatus" class="subtle" aria-live="polite" style="margin: 0; text-align: right; min-height: 1.2em"></div>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- Item detail modal -->
+    <div id="itemOverlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="itemTitle" data-open="false">
+      <div class="modal">
+        <div class="modalHeader">
+          <p class="modalTitle" id="itemTitle">ITEM / DETAILS</p>
+          <button id="closeItem" class="closeBtn" type="button" aria-label="Close item dialog">ESC</button>
+        </div>
+        <div class="modalBody">
+          <div class="twoCol">
+            <div>
+              <p class="hint" id="itemDesc"></p>
+              <div class="btnRow" id="itemTags" style="margin-bottom: 12px"></div>
+              <div class="formRow">
+                <label class="subtle" style="display: grid; gap: 6px">
+                  Package
+                  <select id="packageSelect"></select>
+                </label>
+                <div class="btnRow">
+                  <button id="buyBtn" class="btn cyan" type="button">PURCHASE</button>
+                  <div class="subtle" id="priceLine" style="margin: 0; text-align: right; flex: 1"></div>
+                </div>
+              </div>
+            </div>
+            <div>
+              <p class="hint">Manual / Instructions</p>
+              <div id="itemManual" class="monoBox"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="toasts" aria-live="polite" aria-label="Notifications"></div>
+
+    <script>
+      (function () {
+        const $ = (sel, root = document) => root.querySelector(sel);
+        const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+        // ---------- utilities ----------
+        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+        const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
+        const nowISO = () => new Date().toISOString();
+        const randInt = (min, max) => Math.floor(min + Math.random() * (max - min + 1));
+        const fmtCR = (n) => Number(n || 0).toLocaleString("en-US") + " CR";
+        const safeId = (prefix = "id") => `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
+
+        const escapeHtml = (str) =>
+          String(str ?? "")
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#039;");
+
+        // ---------- auth hash (no plaintext credentials stored) ----------
+        // Uses SHA-256 via WebCrypto for credential matching.
+        // Note: Some browsers restrict `crypto.subtle` on `file://` pages. We fall back to a pure-JS SHA-256
+        // implementation to ensure the login flow never hangs at "verifying...".
+        function sha256HexJs(message) {
+          const msg = String(message ?? "");
+
+          function rrot(n, x) {
+            return (x >>> n) | (x << (32 - n));
+          }
+          function toHex32(x) {
+            return (x >>> 0).toString(16).padStart(8, "0");
+          }
+
+          const K = [
+            0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+            0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+            0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+            0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+            0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+            0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+            0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+            0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+          ];
+
+          let H0 = 0x6a09e667;
+          let H1 = 0xbb67ae85;
+          let H2 = 0x3c6ef372;
+          let H3 = 0xa54ff53a;
+          let H4 = 0x510e527f;
+          let H5 = 0x9b05688c;
+          let H6 = 0x1f83d9ab;
+          let H7 = 0x5be0cd19;
+
+          // UTF-8 encode
+          const bytes = new TextEncoder().encode(msg);
+          const bitLenHi = Math.floor((bytes.length * 8) / 0x100000000);
+          const bitLenLo = (bytes.length * 8) >>> 0;
+
+          // Pre-processing: padding
+          const withOne = new Uint8Array(bytes.length + 1);
+          withOne.set(bytes, 0);
+          withOne[bytes.length] = 0x80;
+
+          let paddedLen = withOne.length;
+          while ((paddedLen % 64) !== 56) paddedLen++;
+          const padded = new Uint8Array(paddedLen + 8);
+          padded.set(withOne, 0);
+
+          // Append length (big-endian 64-bit)
+          padded[padded.length - 8] = (bitLenHi >>> 24) & 0xff;
+          padded[padded.length - 7] = (bitLenHi >>> 16) & 0xff;
+          padded[padded.length - 6] = (bitLenHi >>> 8) & 0xff;
+          padded[padded.length - 5] = bitLenHi & 0xff;
+          padded[padded.length - 4] = (bitLenLo >>> 24) & 0xff;
+          padded[padded.length - 3] = (bitLenLo >>> 16) & 0xff;
+          padded[padded.length - 2] = (bitLenLo >>> 8) & 0xff;
+          padded[padded.length - 1] = bitLenLo & 0xff;
+
+          const W = new Uint32Array(64);
+
+          for (let i = 0; i < padded.length; i += 64) {
+            // Prepare message schedule
+            for (let t = 0; t < 16; t++) {
+              const j = i + t * 4;
+              W[t] = ((padded[j] << 24) | (padded[j + 1] << 16) | (padded[j + 2] << 8) | padded[j + 3]) >>> 0;
+            }
+            for (let t = 16; t < 64; t++) {
+              const s0 = (rrot(7, W[t - 15]) ^ rrot(18, W[t - 15]) ^ (W[t - 15] >>> 3)) >>> 0;
+              const s1 = (rrot(17, W[t - 2]) ^ rrot(19, W[t - 2]) ^ (W[t - 2] >>> 10)) >>> 0;
+              W[t] = (W[t - 16] + s0 + W[t - 7] + s1) >>> 0;
+            }
+
+            let a = H0,
+              b = H1,
+              c = H2,
+              d = H3,
+              e = H4,
+              f = H5,
+              g = H6,
+              h = H7;
+
+            for (let t = 0; t < 64; t++) {
+              const S1 = (rrot(6, e) ^ rrot(11, e) ^ rrot(25, e)) >>> 0;
+              const ch = ((e & f) ^ (~e & g)) >>> 0;
+              const temp1 = (h + S1 + ch + K[t] + W[t]) >>> 0;
+              const S0 = (rrot(2, a) ^ rrot(13, a) ^ rrot(22, a)) >>> 0;
+              const maj = ((a & b) ^ (a & c) ^ (b & c)) >>> 0;
+              const temp2 = (S0 + maj) >>> 0;
+
+              h = g;
+              g = f;
+              f = e;
+              e = (d + temp1) >>> 0;
+              d = c;
+              c = b;
+              b = a;
+              a = (temp1 + temp2) >>> 0;
+            }
+
+            H0 = (H0 + a) >>> 0;
+            H1 = (H1 + b) >>> 0;
+            H2 = (H2 + c) >>> 0;
+            H3 = (H3 + d) >>> 0;
+            H4 = (H4 + e) >>> 0;
+            H5 = (H5 + f) >>> 0;
+            H6 = (H6 + g) >>> 0;
+            H7 = (H7 + h) >>> 0;
+          }
+
+          return (toHex32(H0) + toHex32(H1) + toHex32(H2) + toHex32(H3) + toHex32(H4) + toHex32(H5) + toHex32(H6) + toHex32(H7)).toLowerCase();
+        }
+
+        async function sha256Hex(input) {
+          const msg = String(input ?? "");
+          try {
+            if (!globalThis.crypto || !crypto.subtle) return sha256HexJs(msg);
+            const data = new TextEncoder().encode(msg);
+            const buf = await crypto.subtle.digest("SHA-256", data);
+            const bytes = new Uint8Array(buf);
+            let out = "";
+            for (let i = 0; i < bytes.length; i++) out += bytes[i].toString(16).padStart(2, "0");
+            return out;
+          } catch {
+            return sha256HexJs(msg);
+          }
+        }
+
+        // Stored credential hashes (SHA-256). Plaintext ID/PASS are not present in this script.
+        const ADMIN_ID_HASHES = new Set([
+          "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",
+          "4813494d137e1631bba301d5acab6e7bb7aa74ce1185d456565ef51d737677b2",
+        ]);
+        const ADMIN_PASS_HASH = "fd5a99b2a4b49e578282a6cf4e976f85581b1ed96f377fbf4cdd89d5c21a311d";
+
+        // Session-only persistence (tab-scoped; wiped on tab close)
+        // Requirement: credits, inventory, posts, login state must survive refresh/F5 via sessionStorage,
+        // but the market list must always re-sync from defaultMarketItems on load.
+        const SESSION_APP_KEY = "aimstoreNexusAppDataV2";
+
+        function buildFreshState() {
+          return {
+            user: {
+              id: "guest",
+              isLoggedIn: false,
+              isAdmin: false,
+              rank: "Agent",
+              balance: 1_000_000,
+              inventory: [],
+            },
+            posts: [],
+            // IMPORTANT: marketItems will always be overwritten from defaultMarketItems on load
+            marketItems: getDefaultMarketItems(),
+            ui: { activeSection: "home" },
+          };
+        }
+
+        function loadAppData() {
+          const base = buildFreshState();
+          try {
+            const raw = sessionStorage.getItem(SESSION_APP_KEY);
+            if (!raw) return base;
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== "object") return base;
+
+            // user
+            if (parsed.user && typeof parsed.user === "object") {
+              if (typeof parsed.user.id === "string") base.user.id = parsed.user.id;
+              if (typeof parsed.user.isLoggedIn === "boolean") base.user.isLoggedIn = parsed.user.isLoggedIn;
+              if (typeof parsed.user.isAdmin === "boolean") base.user.isAdmin = parsed.user.isAdmin;
+              if (typeof parsed.user.balance === "number" && Number.isFinite(parsed.user.balance)) base.user.balance = parsed.user.balance;
+              if (Array.isArray(parsed.user.inventory)) base.user.inventory = parsed.user.inventory.slice(0, 200);
+            }
+            base.user.rank = base.user.isAdmin ? "Root Admin" : "Agent";
+
+            // posts
+            if (Array.isArray(parsed.posts)) base.posts = parsed.posts.slice(0, 200);
+
+            // ui
+            if (parsed.ui && typeof parsed.ui === "object" && typeof parsed.ui.activeSection === "string") {
+              base.ui.activeSection = parsed.ui.activeSection;
+            }
+
+            // market: ALWAYS use current code defaultMarketItems (sync)
+            base.marketItems = getDefaultMarketItems();
+            return base;
+          } catch {
+            return base;
+          }
+        }
+
+        function saveAppData() {
+          const payload = {
+            user: {
+              id: state.user.id,
+              isLoggedIn: state.user.isLoggedIn,
+              isAdmin: state.user.isAdmin,
+              balance: state.user.balance,
+              inventory: state.user.inventory,
+            },
+            posts: state.posts,
+            ui: { activeSection: state.ui.activeSection },
+            // market intentionally excluded to avoid blocking new defaults
+          };
+          sessionStorage.setItem(SESSION_APP_KEY, JSON.stringify(payload));
+        }
+
+        function clearAppData() {
+          sessionStorage.removeItem(SESSION_APP_KEY);
+        }
+
+        // ---------- audio feedback (beep) ----------
+        let audioCtx = null;
+        function beep(type = "tap") {
+          try {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const ctx = audioCtx;
+            const o = ctx.createOscillator();
+            const g = ctx.createGain();
+
+            const t0 = ctx.currentTime;
+            const freq = type === "error" ? 140 : type === "ok" ? 520 : type === "switch" ? 360 : 320;
+            const dur = type === "switch" ? 0.05 : 0.04;
+
+            o.type = "square";
+            o.frequency.setValueAtTime(freq, t0);
+            g.gain.setValueAtTime(0.0001, t0);
+            g.gain.exponentialRampToValueAtTime(0.06, t0 + 0.01);
+            g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+            o.connect(g);
+            g.connect(ctx.destination);
+            o.start(t0);
+            o.stop(t0 + dur + 0.02);
+          } catch {
+            // ignore autoplay policy errors
+          }
+        }
+
+        // ---------- toast system ----------
+        const toasts = $("#toasts");
+        function toast(title, message, variant = "ok") {
+          const el = document.createElement("div");
+          el.className = `toast ${variant === "error" ? "error" : variant === "ok" ? "ok" : ""}`;
+          el.innerHTML = `<strong>${escapeHtml(title)}</strong><div>${escapeHtml(message)}</div>`;
+          toasts.appendChild(el);
+          window.setTimeout(() => {
+            el.style.opacity = "0";
+            el.style.transition = "opacity 180ms ease";
+            window.setTimeout(() => el.remove(), 220);
+          }, 2600);
+        }
+
+        // ---------- default data ----------
+        // Supports per-item custom bypass URL via `bypassUrl`.
+        // Also supports shorthand keys for quick edits:
+        // { id: 'item1', t: 'Product Name', p: 1000, u: 'direct_link', bypassUrl: 'https://vuoitlink.com/custom_id_1' }
+        const defaultMarketItems = [
+         {
+            id: "𝘾𝙝𝙚𝙖𝙩𝙇𝙤𝙜𝙞𝙣𝘼𝙣𝙙𝙧𝙤𝙞𝙙𝘾𝘼",
+            t: "[ADR + IOS] 𝘾𝙝𝙚𝙖𝙩𝙇𝙤𝙜𝙞𝙣𝘼𝙣𝙙𝙧𝙤𝙞𝙙𝘾𝘼 - VIP VERSION ",
+            d: "MK NOTE : rv4vrw3 - VIP VERSION",
+            tags: ["CCCA", "ffth", "ffmax", "ADR", "IOS"],
+            u: "https://note1s.net/note/n4yAaQ77fhxB",
+            bypassUrl: "https://note1s.net/note/n4yAaQ77fhxB",
+            packages: [
+              { name: "Trial (24H)", price: 1500000, note: "Limited access / time-boxed token" },
+              { name: "Weekly", price: 4000000, note: "Standard weekly license" },
+              { name: "Lifetime", price: 9000000, note: "One-time purchase (local demo)" },
+            ],
+            manual:
+              "> MẬT KHẨU NOTE : rv4vrw3 \n\n> NOTES:\n- N/A",
+          },
+            {
+            id: "DeltaCCCA",
+            t: "[ADR + IOS] DELTACCCA - VIP VERSION ",
+            d: "MK NOTE : 425fs4vt4 - VIP VERSION",
+            tags: ["CCCA", "ffth", "ffmax", "ADR", "IOS"],
+            u: "https://note1s.net/note/BzFt0HwKBkVz",
+            bypassUrl: "https://note1s.net/note/BzFt0HwKBkVz",
+            packages: [
+              { name: "Trial (24H)", price: 1500000, note: "Limited access / time-boxed token" },
+              { name: "Weekly", price: 4000000, note: "Standard weekly license" },
+              { name: "Lifetime", price: 9000000, note: "One-time purchase (local demo)" },
+            ],
+            manual:
+              "> MẬT KHẨU NOTE : 425fs4vt4 \n\n> NOTES:\n- N/A",
+          },
+            {
+            id: "superfile",
+            t: "[ADR + IOS] Super File OB53 - VIP VERSION ",
+            d: "Siêu phẩm OB53 - HotVer - VIP VERSION",
+            tags: ["vip", "ffth", "ffmax", "ADR", "IOS"],
+            u: "https://link4sub.com/notes/KOaf",
+            bypassUrl: "https://link4sub.com/notes/KOaf",
+            packages: [
+              { name: "Trial (24H)", price: 1500000, note: "Limited access / time-boxed token" },
+              { name: "Weekly", price: 4000000, note: "Standard weekly license" },
+              { name: "Lifetime", price: 9000000, note: "One-time purchase (local demo)" },
+            ],
+            manual:
+              "> INSTALL:\n- Cách cài trong file \n\n> NOTES:\n- HSD 10/05/2026\n- ADR + IOS",
+          },
+            {
+            id: "ca_aimlock_adr_ios",
+            t: "[ADR + IOS] AimLock OB53 - VIP VERSION ",
+            d: "AimLockVIP - Antiban 100% - VIP VERSION ",
+            tags: ["vip", "ffth", "ffmax", "ADR", "IOS"],
+            u: "https://link4sub.com/note/8Bw0",
+            bypassUrl: "https://link4sub.com/note/8Bw0",
+            packages: [
+              { name: "Trial (24H)", price: 1500000, note: "Limited access / time-boxed token" },
+              { name: "Weekly", price: 4000000, note: "Standard weekly license" },
+              { name: "Lifetime", price: 9000000, note: "One-time purchase (local demo)" },
+            ],
+            manual:
+              "> INSTALL:\n- Cài chứng chỉ CA\n- Antiban 100%\n- File Free nên ít tác dụng , mua file inbox\n\n> NOTES:\n- HSD 10/05/2026\n- ADR + IOS",
+          },
+            {
+            id: "m_aimlock_vip",
+            t: "[OLD VERSION] AimLock VIP - VIP VERSION ",
+            d: "AimLockVIP - Antiban 100% - VIP VERSION ",
+            tags: ["vip", "ffth", "ffmax"],
+            u: "https://link4sub.com/notes/Lmr1",
+            bypassUrl: "https://link4sub.com/notes/Lmr1",
+            packages: [
+              { name: "Trial (24H)", price: 1500000, note: "Limited access / time-boxed token" },
+              { name: "Weekly", price: 4000000, note: "Standard weekly license" },
+              { name: "Lifetime", price: 9000000, note: "One-time purchase (local demo)" },
+            ],
+            manual:
+              "> INSTALL:\n- Launch module in sandbox\n- Apply profile\n- Test recoil + aim curves\n\n> NOTES:\n- Keep configs minimal\n- Rotate parameters between sessions",
+          },
+          {
+            id: "m_super_scripts",
+            t: "[OLD VERSION] AimLock Super - VIP VERSION",
+            d: "AimLock - Antiban 100% - VIP VERSION ",
+            tags: ["scripts", "SuperAim", "VIP"],
+            u: "https://link4sub.com/notes/oQat",
+            bypassUrl: "https://link4sub.com/notes/oQat",
+            packages: [
+              { name: "Pack: Basic", price: 1500000, note: "Core scripts + presets" },
+              { name: "Pack: Pro", price: 4000000, note: "Expanded library + variants" },
+              { name: "Pack: Ghost", price: 9000000, note: "Stealth patterns (demo)" },
+            ],
+            manual:
+              "> USAGE:\n- Select script\n- Apply profile\n- Validate output\n\n> WARNING:\n- Always keep a fallback profile\n- Do not stack conflicting scripts",
+          },
+          {
+            id: "m_antiban",
+            t: "[OLD VERSION] AimLock 15M TOKEN - VIP VERSION",
+            d: "AimLock - Antiban 100% - VIP VERSION ",
+            tags: ["antiban", "stealth", "shield"],
+            u: "https://link4sub.com/notes/VI1u",
+            bypassUrl: "https://link4sub.com/notes/VI1u",
+            packages: [
+              { name: "Module A", price: 1500000, note: "Basic shield layer" },
+              { name: "Module B", price: 4000000, note: "Enhanced smoothing" },
+              { name: "Module X (ROOT)", price: 9000000, note: "Restricted package (demo)" },
+            ],
+            manual:
+              "> GUIDELINES:\n- Enable only one module at a time\n- Monitor telemetry spikes\n\n> ROOT:\n- Module X is visible to all (demo)",
+          },
+        ];
+
+        function normalizeMarketItem(raw) {
+          const r = raw && typeof raw === "object" ? raw : {};
+          const id = String(r.id || "");
+          const title = String(r.title ?? r.t ?? "UNNAMED");
+          const desc = String(r.desc ?? r.d ?? "");
+          const url = String(r.url ?? r.u ?? "");
+          const bypassUrl = r.bypassUrl ? String(r.bypassUrl) : "";
+          const tags = Array.isArray(r.tags) ? r.tags.map((x) => String(x)) : [];
+          const manual = String(r.manual ?? "");
+
+          // Support shorthand "p" as base price if packages aren't provided.
+          let packages = Array.isArray(r.packages) ? r.packages : null;
+          const basePrice =
+            typeof r.p === "number" && Number.isFinite(r.p)
+              ? r.p
+              : Number.isFinite(parseInt(r.p, 10))
+                ? parseInt(r.p, 10)
+                : null;
+          if (!packages && basePrice !== null) {
+            packages = [{ name: "Base", price: Math.max(0, basePrice), note: "Base package" }];
+          }
+          if (!packages) packages = [{ name: "Base", price: 0, note: "No pricing configured" }];
+
+          return { id, title, desc, url, bypassUrl, tags, packages, manual };
+        }
+
+        function getDefaultMarketItems() {
+          return defaultMarketItems.map(normalizeMarketItem);
+        }
+
+        let state = loadAppData();
+
+        // ---------- UI: nav & section switch ----------
+        const navMenu = $("#navMenu");
+        const hamburger = $("#hamburger");
+        const scanFlash = $("#scanFlash");
+
+        function setNavOpen(open) {
+          navMenu.dataset.open = open ? "true" : "false";
+          hamburger.setAttribute("aria-expanded", open ? "true" : "false");
+        }
+
+        hamburger.addEventListener("click", () => {
+          beep("tap");
+          setNavOpen(navMenu.dataset.open !== "true");
+        });
+
+        function showScanFlash() {
+          scanFlash.classList.remove("on");
+          void scanFlash.offsetWidth;
+          scanFlash.classList.add("on");
+          window.setTimeout(() => scanFlash.classList.remove("on"), 320);
+        }
+
+        function ensureAdminNav() {
+          const existing = navMenu.querySelector('[data-nav="admin"]');
+          if (state.user.isAdmin && !existing) {
+            const li = document.createElement("li");
+            li.innerHTML = `<button class="navBtn" type="button" data-nav="admin">[ SYS_ADMIN ]</button>`;
+            navMenu.querySelector("ul").appendChild(li);
+          }
+          if (!state.user.isAdmin && existing) {
+            const li = existing.closest("li");
+            if (li) li.remove();
+          }
+        }
+
+        function setActiveSection(sectionId) {
+          const sections = $$(".section");
+          const found = sections.find((s) => s.dataset.section === sectionId);
+          if (!found) return;
+          sections.forEach((s) => s.classList.toggle("active", s === found));
+          state.ui.activeSection = sectionId;
+          saveAppData();
+          showScanFlash();
+          beep("switch");
+          setNavOpen(false);
+          renderAll();
+        }
+
+        document.addEventListener("click", (e) => {
+          const t = e.target instanceof Element ? e.target : null;
+          if (!t) return;
+          const navBtn = t.closest("[data-nav]");
+          if (!navBtn) return;
+          const sectionId = navBtn.getAttribute("data-nav");
+          if (!sectionId) return;
+          if (sectionId === "admin" && !state.user.isAdmin) {
+            beep("error");
+            toast("SYS_ADMIN", "Root access required.", "error");
+            return;
+          }
+          setActiveSection(sectionId);
+        });
+
+        // ---------- modals ----------
+        const loginOverlay = $("#loginOverlay");
+        const itemOverlay = $("#itemOverlay");
+        const openLogin = $("#openLogin");
+        const closeLogin = $("#closeLogin");
+        const closeItem = $("#closeItem");
+
+        let lastFocus = null;
+        function setModalOpen(overlayEl, open, focusEl = null) {
+          overlayEl.dataset.open = open ? "true" : "false";
+          if (open) {
+            lastFocus = document.activeElement;
+            if (focusEl) focusEl.focus();
+          } else {
+            if (lastFocus && typeof lastFocus.focus === "function") lastFocus.focus();
+          }
+        }
+
+        openLogin.addEventListener("click", () => {
+          beep("tap");
+          $("#loginStatus").textContent = "";
+          $("#loginForm").reset();
+          $("#submitLogin").disabled = false;
+          setModalOpen(loginOverlay, true, $("#loginId"));
+        });
+        closeLogin.addEventListener("click", () => {
+          beep("tap");
+          setModalOpen(loginOverlay, false);
+        });
+        closeItem.addEventListener("click", () => {
+          beep("tap");
+          setModalOpen(itemOverlay, false);
+        });
+
+        loginOverlay.addEventListener("click", (e) => {
+          if (e.target === loginOverlay) setModalOpen(loginOverlay, false);
+        });
+        itemOverlay.addEventListener("click", (e) => {
+          if (e.target === itemOverlay) setModalOpen(itemOverlay, false);
+        });
+
+        window.addEventListener("keydown", (e) => {
+          if (e.key !== "Escape") return;
+          if (loginOverlay.dataset.open === "true") setModalOpen(loginOverlay, false);
+          if (itemOverlay.dataset.open === "true") setModalOpen(itemOverlay, false);
+        });
+
+        // ---------- login (executeLogin) ----------
+        async function executeLogin() {
+          const idRaw = $("#loginId").value.trim();
+          const pass = $("#loginPass").value;
+          const id = idRaw.trim();
+          const idLower = id.toLowerCase();
+
+          if (!id || !pass) {
+            beep("error");
+            toast("LOGIN", "ID and PASS required.", "error");
+            return { ok: false };
+          }
+
+          $("#submitLogin").disabled = true;
+          $("#loginStatus").innerHTML = `<span class="loader" aria-hidden="true"></span>verifying...`;
+
+          try {
+            await sleep(420);
+
+            const idHash = await sha256Hex(idLower);
+            const passHash = await sha256Hex(pass);
+            const isAdminId = ADMIN_ID_HASHES.has(idHash);
+            const passOk = passHash === ADMIN_PASS_HASH;
+
+            if (isAdminId && !passOk) {
+              $("#loginStatus").textContent = "DENIED";
+              beep("error");
+              toast("LOGIN", "Root/Admin password mismatch.", "error");
+              return { ok: false };
+            }
+
+            // Admin privileges require matching both hashed ID + hashed PASS.
+            // Standard users are allowed (demo).
+            const isAdmin = isAdminId && passOk;
+            state.user.id = id;
+            state.user.isLoggedIn = true;
+            state.user.isAdmin = isAdmin;
+            state.user.rank = isAdmin ? "Root Admin" : "Agent";
+            saveAppData();
+
+            $("#loginStatus").textContent = isAdmin ? "ROOT GRANTED" : "ACCESS GRANTED";
+            toast("AUTH", isAdmin ? "SYS_ADMIN unlocked." : "Profile unlocked.", "ok");
+            beep("ok");
+            renderAll();
+
+            await sleep(260);
+            setModalOpen(loginOverlay, false);
+            return { ok: true, isAdmin };
+          } catch {
+            $("#loginStatus").textContent = "ERROR";
+            beep("error");
+            toast("LOGIN", "Verification engine error. Try again.", "error");
+            return { ok: false };
+          } finally {
+            $("#submitLogin").disabled = false;
+          }
+        }
+
+        let loginBusy = false;
+        $("#loginForm").addEventListener("submit", async (e) => {
+          e.preventDefault();
+          if (loginBusy) return;
+          loginBusy = true;
+          try {
+            await executeLogin();
+          } finally {
+            loginBusy = false;
+          }
+        });
+
+        // ---------- home terminal ----------
+        const bootLines = [
+          "> boot:: SYS.AIMSTORE_NEXUS",
+          "link:: SOCIAL_NET [OPEN]",
+          "link:: GAME_ZONES [READY]",
+          "link:: BLACK_MARKET [INDEXED]",
+          "state:: session vault: aimstoreNexusAppDataV2",
+          "status:: awaiting operator input...",
+        ];
+
+        async function typeBoot() {
+          const box = $("#homeTerminal");
+          box.textContent = "";
+          for (const line of bootLines) {
+            for (let i = 0; i < line.length; i++) {
+              box.textContent += line[i];
+              await sleep(10);
+            }
+            box.textContent += "\n";
+            await sleep(120);
+          }
+        }
+
+        // ---------- social ----------
+        $("#clearDraftBtn").addEventListener("click", () => {
+          $("#postText").value = "";
+          toast("DRAFT", "Cleared.", "ok");
+        });
+
+        $("#postBtn").addEventListener("click", () => {
+          const text = $("#postText").value.trim();
+          if (!text) {
+            beep("error");
+            toast("SOCIAL_NET", "Cannot post empty message.", "error");
+            return;
+          }
+          const username = state.user.isLoggedIn ? state.user.id : "guest";
+          state.posts.unshift({ id: safeId("p"), user: username, text, ts: nowISO() });
+          saveAppData();
+          $("#postText").value = "";
+          toast("SOCIAL_NET", "Post transmitted.", "ok");
+          beep("ok");
+          renderFeed();
+        });
+
+        function renderFeed() {
+          const feed = $("#feed");
+          $("#postCount").textContent = String(state.posts.length);
+          feed.innerHTML = "";
+          if (state.posts.length === 0) {
+            const empty = document.createElement("div");
+            empty.className = "monoBox";
+            empty.textContent = "No posts yet. Transmit the first message.";
+            feed.appendChild(empty);
+            return;
+          }
+          for (const p of state.posts.slice(0, 40)) {
+            const el = document.createElement("div");
+            el.className = "post";
+            const dt = new Date(p.ts);
+            const time = isNaN(dt.getTime()) ? p.ts : dt.toLocaleString();
+            el.innerHTML = `
+              <div class="postTop">
+                <div class="userTag">@${escapeHtml(p.user)}</div>
+                <div class="timeTag">${escapeHtml(time)} • <span style="opacity:.9">id:${escapeHtml(p.id)}</span></div>
+              </div>
+              <p class="postBody">${escapeHtml(p.text)}</p>
+            `;
+            feed.appendChild(el);
+          }
+        }
+
+        // ---------- game zones ----------
+        function runScan() {
+          const device = $("#deviceName").value.trim() || "Unknown Device";
+          const dpi = randInt(400, 900);
+          const general = randInt(150, 200);
+          const redDot = randInt(150, 200);
+          const twoX = randInt(150, 200);
+          const fourX = randInt(150, 200);
+          const awm = randInt(150, 200);
+          const freeLook = randInt(150, 200);
+
+          $("#scanResult").textContent =
+            `> DEVICE: ${device}\n` +
+            `> DPI: ${dpi}\n\n` +
+            `SENSITIVITY:\n` +
+            `- General: ${general}\n` +
+            `- Red Dot: ${redDot}\n` +
+            `- 2X Scope: ${twoX}\n` +
+            `- 4X Scope: ${fourX}\n` +
+            `- AWM Scope: ${awm}\n` +
+            `- Free Look: ${freeLook}\n\n` +
+            `> STATUS: calibrated (simulated)`;
+        }
+
+        $("#scanBtn").addEventListener("click", () => {
+          runScan();
+          toast("GAME_ZONES", "Scan complete.", "ok");
+        });
+        $("#rngBtn").addEventListener("click", () => runScan());
+
+        // ---------- market ----------
+        const packageSelect = $("#packageSelect");
+        const buyBtn = $("#buyBtn");
+        const priceLine = $("#priceLine");
+        let activeItemId = null;
+
+        function renderMarket() {
+          const grid = $("#marketGrid");
+          grid.innerHTML = "";
+          for (const item of state.marketItems) {
+            const el = document.createElement("div");
+            el.className = "marketCard";
+            const directUrl = item.url || "";
+            const bypassUrl = item.bypassUrl || "";
+            const showBypass = Boolean(bypassUrl);
+            el.innerHTML = `
+              <h3>${escapeHtml(item.title)}</h3>
+              <p>${escapeHtml(item.desc)}</p>
+              <div class="marketActions" aria-label="Item actions">
+                <button class="btn cyan sm" type="button" data-view-item="${escapeHtml(item.id)}">VIEW DETAILS</button>
+                <a class="btn sm" href="${escapeHtml(directUrl)}" target="_blank" rel="noopener noreferrer">GET_FILE</a>
+                ${
+                  showBypass
+                    ? `<a class="btn pink sm" href="${escapeHtml(bypassUrl)}" target="_blank" rel="noopener noreferrer">BYPASS_LINK</a>`
+                    : ""
+                }
+              </div>
+              <div class="btnRow" style="margin-top:10px">
+                <span class="subtle" style="margin:0">${escapeHtml((item.tags || []).slice(0, 3).join(" • "))}</span>
+                <span class="subtle" style="margin:0; flex:1; text-align:right">by MT EDITER</span>
+              </div>
+            `;
+            grid.appendChild(el);
+          }
+        }
+
+        document.addEventListener("click", (e) => {
+          const t = e.target instanceof Element ? e.target : null;
+          if (!t) return;
+          const btn = t.closest("[data-view-item]");
+          if (!btn) return;
+          const id = btn.getAttribute("data-view-item");
+          if (!id) return;
+          openItemModal(id);
+        });
+
+        // GET_FILE / BYPASS_LINK are anchors now (no JS required).
+
+        function openItemModal(itemId) {
+          const item = state.marketItems.find((m) => m.id === itemId);
+          if (!item) {
+            beep("error");
+            toast("BLACK_MARKET", "Item not found.", "error");
+            return;
+          }
+          activeItemId = itemId;
+          $("#itemTitle").textContent = `ITEM / ${String(item.title).toUpperCase()}`;
+          $("#itemDesc").textContent = item.desc;
+          $("#itemManual").textContent = item.manual || "No manual.";
+
+          const tagsWrap = $("#itemTags");
+          tagsWrap.innerHTML = "";
+          for (const tag of item.tags || []) {
+            const s = document.createElement("span");
+            s.className = "tag";
+            s.textContent = "#" + tag;
+            tagsWrap.appendChild(s);
+          }
+
+          packageSelect.innerHTML = "";
+          (item.packages || []).forEach((p, idx) => {
+            const opt = document.createElement("option");
+            opt.value = String(idx);
+            opt.textContent = `${p.name} — ${fmtCR(p.price)}`;
+            packageSelect.appendChild(opt);
+          });
+          packageSelect.value = "0";
+          updatePriceLine();
+          setModalOpen(itemOverlay, true, packageSelect);
+        }
+
+        function updatePriceLine() {
+          const item = state.marketItems.find((m) => m.id === activeItemId);
+          if (!item) return;
+          const idx = clamp(parseInt(packageSelect.value || "0", 10) || 0, 0, (item.packages || []).length - 1);
+          const pack = item.packages[idx];
+          priceLine.textContent = `${fmtCR(pack.price)} • ${pack.note || ""}`;
+        }
+
+        packageSelect.addEventListener("change", () => {
+          beep("tap");
+          updatePriceLine();
+        });
+
+        buyBtn.addEventListener("click", async () => {
+          const item = state.marketItems.find((m) => m.id === activeItemId);
+          if (!item) return;
+          const idx = clamp(parseInt(packageSelect.value || "0", 10) || 0, 0, (item.packages || []).length - 1);
+          const pack = item.packages[idx];
+
+          if (!state.user.isLoggedIn) {
+            beep("error");
+            toast("PURCHASE", "Login required.", "error");
+            setModalOpen(itemOverlay, false);
+            openLogin.click();
+            return;
+          }
+          if (state.user.balance < pack.price) {
+            beep("error");
+            toast("PURCHASE", "Insufficient CR balance.", "error");
+            return;
+          }
+
+          const invKey = `${item.id}::${pack.name}`;
+          if (state.user.inventory.some((x) => x.key === invKey)) {
+            beep("error");
+            toast("PURCHASE", "Already owned.", "error");
+            return;
+          }
+
+          buyBtn.disabled = true;
+          priceLine.innerHTML = `<span class="loader" aria-hidden="true"></span>processing...`;
+          await sleep(650);
+
+          state.user.balance -= pack.price;
+          state.user.inventory.unshift({
+            key: invKey,
+            itemId: item.id,
+            title: item.title,
+            package: pack.name,
+            price: pack.price,
+            ts: nowISO(),
+          });
+          saveAppData();
+
+          buyBtn.disabled = false;
+          updatePriceLine();
+          toast("PURCHASE", `Acquired ${item.title} (${pack.name}).`, "ok");
+          beep("ok");
+          renderAll();
+        });
+
+        // ---------- profile ----------
+        function renderProfile() {
+          const u = state.user;
+          $("#profileBox").textContent =
+            `ID: ${u.id}\n` +
+            `RANK: ${u.isAdmin ? "Root Admin" : "Agent"}\n` +
+            `BALANCE: ${fmtCR(u.balance)}\n` +
+            `INVENTORY: ${u.inventory.length} items\n` +
+            `SESSION: ${SESSION_APP_KEY}\n`;
+
+          const inv = $("#inventoryList");
+          inv.innerHTML = "";
+          if (u.inventory.length === 0) {
+            const empty = document.createElement("div");
+            empty.className = "monoBox";
+            empty.textContent = "No inventory yet. Purchase from BLACK_MARKET.";
+            inv.appendChild(empty);
+            return;
+          }
+          for (const it of u.inventory.slice(0, 50)) {
+            const el = document.createElement("div");
+            el.className = "post";
+            const dt = new Date(it.ts);
+            const time = isNaN(dt.getTime()) ? it.ts : dt.toLocaleString();
+            el.innerHTML = `
+              <div class="postTop">
+                <div class="userTag">${escapeHtml(it.title)} <span style="opacity:.85">(${escapeHtml(it.package)})</span></div>
+                <div class="timeTag">${escapeHtml(time)}</div>
+              </div>
+              <p class="postBody">cost: ${escapeHtml(fmtCR(it.price))}</p>
+            `;
+            inv.appendChild(el);
+          }
+        }
+
+        $("#logoutBtn").addEventListener("click", () => {
+          state.user.id = "guest";
+          state.user.isLoggedIn = false;
+          state.user.isAdmin = false;
+          state.user.rank = "Agent";
+          saveAppData();
+          toast("AUTH", "Logged out.", "ok");
+          renderAll();
+          setActiveSection("home");
+        });
+
+        $("#resetBtn").addEventListener("click", () => {
+          clearAppData();
+          state = loadAppData();
+          toast("SYSTEM", "Session wiped (tab-scoped).", "ok");
+          renderAll();
+          setActiveSection("home");
+          typeBoot();
+        });
+
+        // ---------- SYS_ADMIN ----------
+        function renderAdmin() {
+          $("#adminBalNow").textContent = String(Number(state.user.balance || 0).toLocaleString("en-US"));
+        }
+
+        $("#adminAddItemBtn").addEventListener("click", () => {
+          if (!state.user.isAdmin) {
+            beep("error");
+            toast("SYS_ADMIN", "Root access required.", "error");
+            return;
+          }
+          const title = $("#adminItemTitle").value.trim();
+          const desc = $("#adminItemDesc").value.trim();
+          const tags = $("#adminItemTags").value
+            .split(",")
+            .map((t) => t.trim())
+            .filter(Boolean);
+          const price = Math.max(0, parseInt($("#adminItemPrice").value || "0", 10) || 0);
+          if (!title || !desc || price <= 0) {
+            beep("error");
+            toast("SYS_ADMIN", "Title, description, and price required.", "error");
+            return;
+          }
+          const newItem = {
+            id: safeId("m"),
+            title,
+            desc,
+            tags: tags.length ? tags : ["injected"],
+            packages: [{ name: "Base", price, note: "Injected package" }],
+            url: "https://example.com/file.bin",
+            manual: "> INJECTED ITEM\n- No manual provided.\n- Handle with caution.",
+          };
+          state.marketItems.unshift(newItem);
+          // Keep injected items only for current runtime; market is always re-synced from defaults on refresh.
+          toast("SYS_ADMIN", "Market item injected (runtime only).", "ok");
+          beep("ok");
+          renderMarket();
+        });
+
+        $("#adminAddCreditBtn").addEventListener("click", () => {
+          if (!state.user.isAdmin) {
+            beep("error");
+            toast("SYS_ADMIN", "Root access required.", "error");
+            return;
+          }
+          const add = Math.max(0, parseInt($("#adminCreditAdd").value || "0", 10) || 0);
+          if (add <= 0) {
+            beep("error");
+            toast("SYS_ADMIN", "Enter a positive CR amount.", "error");
+            return;
+          }
+          state.user.balance += add;
+          saveAppData();
+          $("#adminCreditAdd").value = "";
+          toast("SYS_ADMIN", `Added ${fmtCR(add)}.`, "ok");
+          beep("ok");
+          renderAll();
+        });
+
+        $("#adminDeletePostBtn").addEventListener("click", () => {
+          if (!state.user.isAdmin) {
+            beep("error");
+            toast("SYS_ADMIN", "Root access required.", "error");
+            return;
+          }
+          const id = $("#adminDeletePostId").value.trim();
+          if (!id) {
+            beep("error");
+            toast("SYS_ADMIN", "Provide a post ID.", "error");
+            return;
+          }
+          const before = state.posts.length;
+          state.posts = state.posts.filter((p) => p.id !== id);
+          const after = state.posts.length;
+          if (after === before) {
+            beep("error");
+            toast("SYS_ADMIN", "Post not found.", "error");
+          } else {
+            $("#adminDeletePostId").value = "";
+            toast("SYS_ADMIN", "Post deleted.", "ok");
+            beep("ok");
+            saveAppData();
+            renderFeed();
+          }
+        });
+
+        // ---------- global click beep (lightweight) ----------
+        document.addEventListener("click", (e) => {
+          const t = e.target instanceof Element ? e.target : null;
+          if (!t) return;
+          const b = t.closest("button");
+          if (!b) return;
+          const isNav = b.hasAttribute("data-nav");
+          const isHamburger = b.id === "hamburger";
+          if (!isNav && !isHamburger) beep("tap");
+        });
+
+        // ---------- render ----------
+        function renderHud() {
+          $("#hudUser").textContent = `USER: ${String(state.user.id).toUpperCase()}`;
+          $("#hudRank").textContent = `RANK: ${state.user.isAdmin ? "ROOT ADMIN" : "AGENT"}`;
+          $("#hudBalance").textContent = `BAL: ${fmtCR(state.user.balance)}`;
+          $("#hudSection").textContent = String(state.ui.activeSection || "home").toUpperCase();
+
+          const adminSection = $("#adminSection");
+          if (state.user.isAdmin) {
+            adminSection.style.display = "";
+          } else {
+            adminSection.style.display = "none";
+            if (state.ui.activeSection === "admin") state.ui.activeSection = "home";
+          }
+          ensureAdminNav();
+        }
+
+        function syncActiveSectionDom() {
+          const sectionId = state.ui.activeSection || "home";
+          const resolved = sectionId === "admin" && !state.user.isAdmin ? "home" : sectionId;
+          $$(".section").forEach((s) => s.classList.toggle("active", s.dataset.section === resolved));
+          $("#hudSection").textContent = resolved.toUpperCase();
+        }
+
+        function renderAll() {
+          renderHud();
+          renderFeed();
+          renderMarket();
+          renderProfile();
+          renderAdmin();
+          syncActiveSectionDom();
+        }
+
+        // init
+        $("#year").textContent = String(new Date().getFullYear());
+        typeBoot();
+        renderAll();
+        setActiveSection(state.ui.activeSection || "home");
+
+        // ---------- matrix rain ----------
+        const canvas = $("#matrix");
+        const ctx = canvas.getContext("2d", { alpha: true });
+
+        let w = 0;
+        let h = 0;
+        let columns = 0;
+        let drops = [];
+        let fontSize = 16;
+        let lastFrame = performance.now();
+
+        const glyphs =
+          "01ABCDEFGHIJKLMNOPQRSTUVWXYZ#$%*+-=/\\<>[]{}()@&" +
+          "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワ";
+
+        function resize() {
+          const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+          w = Math.floor(window.innerWidth);
+          h = Math.floor(window.innerHeight);
+          canvas.width = Math.floor(w * dpr);
+          canvas.height = Math.floor(h * dpr);
+          canvas.style.width = w + "px";
+          canvas.style.height = h + "px";
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+          fontSize = Math.max(14, Math.min(18, Math.floor(w / 60)));
+          columns = Math.floor(w / fontSize);
+          drops = new Array(columns).fill(0).map(() => Math.floor(Math.random() * h));
+        }
+
+        const randGlyph = () => glyphs[Math.floor(Math.random() * glyphs.length)];
+
+        function frame(now) {
+          const dt = Math.min(32, now - lastFrame);
+          lastFrame = now;
+
+          ctx.fillStyle = "rgba(10, 10, 10, 0.10)";
+          ctx.fillRect(0, 0, w, h);
+
+          for (let i = 0; i < drops.length; i++) {
+            const x = i * fontSize;
+            const y = drops[i];
+            const isCyan = Math.random() < 0.06;
+            ctx.fillStyle = isCyan ? "rgba(0, 170, 255, 0.85)" : "rgba(0, 255, 0, 0.62)";
+            ctx.font = `700 ${fontSize}px "Share Tech Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New", monospace`;
+            ctx.fillText(randGlyph(), x, y);
+
+            drops[i] += (fontSize * (0.85 + Math.random() * 0.55) * dt) / 16;
+            if (drops[i] > h + 40 && Math.random() > 0.985) drops[i] = -Math.random() * 200;
+          }
+
+          requestAnimationFrame(frame);
+        }
+
+        resize();
+        window.addEventListener("resize", resize, { passive: true });
+        requestAnimationFrame(frame);
+      })();
+    </script>
+  </body>
+</html>
